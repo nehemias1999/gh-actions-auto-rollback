@@ -1,0 +1,46 @@
+# ==============================================================================
+# Description: Docker ignore file to exclude unnecessary files from build context.
+# Author: implementer
+# Usage: Place in project root alongside Dockerfile
+# ==============================================================================
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.venv
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+docs/
+
+# Tests (if not needed in image)
+tests/
+
+# Virtual environments
+venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
