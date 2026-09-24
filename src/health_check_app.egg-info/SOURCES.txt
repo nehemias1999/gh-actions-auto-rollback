@@ -1,9 +1,0 @@
-pyproject.toml
-app/__init__.py
-app/main.py
-health_check_app.egg-info/PKG-INFO
-health_check_app.egg-info/SOURCES.txt
-health_check_app.egg-info/dependency_links.txt
-health_check_app.egg-info/requires.txt
-health_check_app.egg-info/top_level.txt
-tests/test_health.py
