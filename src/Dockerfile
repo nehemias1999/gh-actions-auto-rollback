@@ -1,7 +1,7 @@
 # ==============================================================================
-# Description: Multi-stage Dockerfile for the health check service.
+# Description: Multi-stage Dockerfile for the health check service (builder + runtime) using Alpine Linux for minimal image size (<100MB).
 # Author: implementer
-# Usage: docker build -t gh-actions-auto-rollback .
+# Usage: docker build -t gh-actions-auto-rollback src/
 # Env Variables: PORT (default: 8080)
 # Dependencies: Docker
 # ==============================================================================
@@ -11,7 +11,10 @@
 FROM python:3.12-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache gcc musl-dev libffi-dev
+RUN apk add --no-cache \
+    gcc \
+    libffi-dev \
+    musl-dev
 
 # Set working directory
 WORKDIR /app
@@ -23,12 +26,12 @@ COPY pyproject.toml requirements.txt ./
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --only-binary=:all: -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt
 
 # Runtime stage - minimal image
 FROM python:3.12-alpine AS runtime
 
-# Create non-root user
+# Create non-root user (UID 10001)
 RUN addgroup -g 10001 appgroup && \
     adduser -u 10001 -G appgroup -s /bin/bash -D appuser
 
@@ -48,11 +51,12 @@ COPY --chown=appuser:appgroup app/ ./app/
 # Switch to non-root user
 USER appuser
 
-# Expose port
+# Expose port and set PORT environment variable
 EXPOSE 8080
+ENV PORT=8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Health check (interval=30s, timeout=3s, start-period=5s, retries=3)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application
