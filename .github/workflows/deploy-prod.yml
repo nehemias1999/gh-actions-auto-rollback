@@ -1,0 +1,129 @@
+# ==============================================================================
+# Description: Deploy workflow for production. Triggers on push to main,
+#   determines the next semantic version from conventional commits
+#   (angular preset), builds the Docker image tagged with that version
+#   and `latest`, then deploys via scripts/deploy.sh. Any non-zero exit
+#   from the deploy script fails the workflow. The deployed version is
+#   exposed as the `deployed-version` job output for rollback reference.
+# Trigger: push to main branch
+# Usage: runs automatically on push to main (invoked with
+#   `./scripts/deploy.sh --version <semver>` internally); validate
+#   locally with `act push --workflows .github/workflows/deploy-prod.yml`
+# Dependencies: actions/checkout@v4, actions/setup-node@v4,
+#   docker/setup-buildx-action@v3, docker/build-push-action@v6,
+#   cycjimmy/semantic-release-action@v4, scripts/deploy.sh (REQ-007)
+# Exit codes: 0 when release, build, and deploy succeed; non-zero when
+#   semantic-release, the Docker build, or scripts/deploy.sh fails
+# ==============================================================================
+
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  # semantic-release pushes version tags and creates GitHub releases
+  contents: write
+
+env:
+  DOCKER_IMAGE: "gh-actions-auto-rollback"
+  # Path to the Docker build context (Dockerfile lives in src/)
+  APP_PATH: "src"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Deploy job: release (semantic version) -> Docker build -> deploy script.
+  # Exposes `deployed-version` so a rollback workflow can reference the
+  # exact version that was deployed.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Release, Build and Deploy
+    runs-on: ubuntu-latest
+    outputs:
+      deployed-version: ${{ steps.version.outputs.version }}
+    steps:
+      # Full history is required so semantic-release can analyze
+      # conventional commits since the last tag.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The repo has no release config file of its own, so generate the
+      # semantic-release config inline: angular preset over conventional
+      # commits, GitHub releases only (no npm publish for this
+      # Python/Docker project).
+      - name: Write semantic-release config
+        run: |
+          cat > .releaserc.json <<'EOF'
+          {
+            "branches": ["main"],
+            "plugins": [
+              ["@semantic-release/commit-analyzer", {"preset": "angular"}],
+              [
+                "@semantic-release/release-notes-generator",
+                {"preset": "angular"}
+              ],
+              "@semantic-release/github"
+            ]
+          }
+          EOF
+
+      # Determines the next version from conventional commits; publishes
+      # a GitHub release and exposes new_release_version when a release
+      # was cut.
+      - name: Semantic release
+        id: release
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Resolve the version to deploy: the fresh semantic-release version
+      # when one was published, otherwise the latest tag (or a
+      # SHA-based fallback when no tag exists yet).
+      - name: Resolve deployment version
+        id: version
+        run: |
+          PUBLISHED="${{ steps.release.outputs.new_release_published }}"
+          if [ "$PUBLISHED" = "true" ]; then
+            VERSION="${{ steps.release.outputs.new_release_version }}"
+          else
+            VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+            VERSION="${VERSION#v}"
+            if [ -z "$VERSION" ]; then
+              VERSION="0.0.0-${GITHUB_SHA::7}"
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      # Build the image tagged with the semantic version AND `latest`.
+      # Load-only (no registry push) while no registry is configured.
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.APP_PATH }}
+          push: false
+          load: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Deploy the versioned image. A non-zero exit from the script fails
+      # this step and therefore the whole workflow (deploy failure path).
+      - name: Deploy to production
+        run: |
+          ./scripts/deploy.sh \
+            --version "${{ steps.version.outputs.version }}"
