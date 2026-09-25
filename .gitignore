@@ -9,8 +9,7 @@ __pycache__/
 .venv/
 venv/
 .env
-.pytest_cache/
-.mypy_cache/
+.pytest_cache/.mypy_cache/
 .ruff_cache/
 
 # IDE
@@ -18,6 +17,10 @@ venv/
 .idea/
 *.swp
 *.swo
+
+# Local secrets (see .secrets.local.example — never commit real tokens)
+.secrets.local
+.secrets.local.*.bak
 
 # OS
 .DS_Store
